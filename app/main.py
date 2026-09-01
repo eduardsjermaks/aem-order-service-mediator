@@ -5,11 +5,18 @@ from typing import Any
 from fastapi import FastAPI, HTTPException, Query, status
 from pydantic import BaseModel, EmailStr, Field
 
+from app.cancel_order import CancelOrder, CancelOrderHandler
 from app.domain.order import CancellationNotAllowedError, Order
+from app.mediator import Mediator
 from app.repository import OrderRepository
 
 app = FastAPI(title="AEM Order Service")
 app.state.order_repository = OrderRepository()
+app.state.mediator = Mediator()
+app.state.mediator.register(
+    CancelOrder,
+    CancelOrderHandler(lambda: app.state.order_repository),
+)
 
 
 class OrderCreateRequest(BaseModel):
@@ -118,17 +125,17 @@ def update_order(order_id: int, payload: OrderUpdateRequest) -> Any:
 
 @app.post("/orders/{order_id}/cancel", response_model=OrderResponse)
 def cancel_order(order_id: int) -> Any:
-    repository: OrderRepository = app.state.order_repository
-    order = get_order_or_404(repository, order_id)
-
     try:
-        order.cancel()
+        order = app.state.mediator.send(CancelOrder(order_id=order_id))
+    except KeyError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Order with id {order_id} not found",
+        ) from exc
     except CancellationNotAllowedError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Order can only be cancelled from NEW, PENDING, or CONFIRMED status",
         ) from exc
 
-    order.touch()
-    repository.update(order_id, order)
     return order_to_response(order)
