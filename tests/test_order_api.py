@@ -4,6 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.order_cancelled import AuditRepository, NotificationRepository
 from app.repository import OrderRepository
 
 client = TestClient(app)
@@ -12,6 +13,8 @@ client = TestClient(app)
 @pytest.fixture(autouse=True)
 def reset_repository() -> None:
     app.state.order_repository = OrderRepository()
+    app.state.audit_repository = AuditRepository()
+    app.state.notification_repository = NotificationRepository()
 
 
 def test_create_order_returns_201_and_order_payload() -> None:
@@ -159,6 +162,65 @@ def test_cancel_order_returns_cancelled_status() -> None:
     assert response.status_code == 200
     assert response.json()["status"] == "cancelled"
     assert response.json()["id"] == order_id
+
+    audit_response = client.get(f"/orders/{order_id}/audit-records")
+    notification_response = client.get(f"/orders/{order_id}/notifications")
+
+    assert audit_response.status_code == 200
+    assert len(audit_response.json()) == 1
+    assert audit_response.json()[0] == {
+        "order_id": order_id,
+        "action": "order_cancelled",
+        "at": audit_response.json()[0]["at"],
+    }
+    datetime.fromisoformat(audit_response.json()[0]["at"].replace("Z", "+00:00"))
+    assert notification_response.status_code == 200
+    assert len(notification_response.json()) == 1
+    assert notification_response.json()[0] == {
+        "order_id": order_id,
+        "type": "order_cancelled",
+        "recipient": "customer@example.com",
+        "message": f"Order {order_id} was cancelled",
+        "at": notification_response.json()[0]["at"],
+    }
+    datetime.fromisoformat(notification_response.json()[0]["at"].replace("Z", "+00:00"))
+
+
+def test_failed_cancellation_creates_no_effects() -> None:
+    create_response = client.post(
+        "/orders",
+        json={
+            "customer_email": "customer@example.com",
+            "amount": 49.99,
+            "status": "shipped",
+        },
+    )
+    order_id = create_response.json()["id"]
+
+    assert client.post(f"/orders/{order_id}/cancel").status_code == 400
+    assert client.get(f"/orders/{order_id}/audit-records").json() == []
+    assert client.get(f"/orders/{order_id}/notifications").json() == []
+
+    assert client.post("/orders/999/cancel").status_code == 404
+    assert client.get("/orders/999/audit-records").status_code == 404
+    assert client.get("/orders/999/notifications").status_code == 404
+
+
+def test_repeated_cancellation_creates_no_additional_effects() -> None:
+    create_response = client.post(
+        "/orders",
+        json={
+            "customer_email": "customer@example.com",
+            "amount": 49.99,
+            "status": "pending",
+        },
+    )
+    order_id = create_response.json()["id"]
+
+    assert client.post(f"/orders/{order_id}/cancel").status_code == 200
+    assert client.post(f"/orders/{order_id}/cancel").status_code == 400
+    assert len(client.get(f"/orders/{order_id}/audit-records").json()) == 1
+    assert len(client.get(f"/orders/{order_id}/notifications").json()) == 1
 
 
 def test_cancel_missing_order_returns_404() -> None:

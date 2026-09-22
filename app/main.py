@@ -8,14 +8,34 @@ from pydantic import BaseModel, EmailStr, Field
 from app.cancel_order import CancelOrder, CancelOrderHandler
 from app.domain.order import CancellationNotAllowedError, Order
 from app.mediator import Mediator
+from app.order_cancelled import (
+    AuditRepository,
+    AuditSubscriber,
+    NotificationRepository,
+    NotificationSubscriber,
+    OrderCancelled,
+)
 from app.repository import OrderRepository
 
 app = FastAPI(title="AEM Order Service")
 app.state.order_repository = OrderRepository()
+app.state.audit_repository = AuditRepository()
+app.state.notification_repository = NotificationRepository()
 app.state.mediator = Mediator()
 app.state.mediator.register(
     CancelOrder,
-    CancelOrderHandler(lambda: app.state.order_repository),
+    CancelOrderHandler(
+        lambda: app.state.order_repository,
+        app.state.mediator.publish,
+    ),
+)
+app.state.mediator.subscribe(
+    OrderCancelled,
+    AuditSubscriber(lambda: app.state.audit_repository),
+)
+app.state.mediator.subscribe(
+    OrderCancelled,
+    NotificationSubscriber(lambda: app.state.notification_repository),
 )
 
 
@@ -37,6 +57,20 @@ class OrderResponse(BaseModel):
     amount: float
     status: str
     created_at: str
+
+
+class AuditRecordResponse(BaseModel):
+    order_id: int
+    action: str
+    at: str
+
+
+class NotificationResponse(BaseModel):
+    order_id: int
+    type: str
+    recipient: EmailStr
+    message: str
+    at: str
 
 
 def get_order_or_404(repository: OrderRepository, order_id: int) -> Order:
@@ -139,3 +173,33 @@ def cancel_order(order_id: int) -> Any:
         ) from exc
 
     return order_to_response(order)
+
+
+@app.get("/orders/{order_id}/audit-records", response_model=list[AuditRecordResponse])
+def list_audit_records(order_id: int) -> list[AuditRecordResponse]:
+    repository: OrderRepository = app.state.order_repository
+    get_order_or_404(repository, order_id)
+    return [
+        AuditRecordResponse(
+            order_id=record.order_id,
+            action=record.action,
+            at=record.at.isoformat(),
+        )
+        for record in app.state.audit_repository.list_for_order(order_id)
+    ]
+
+
+@app.get("/orders/{order_id}/notifications", response_model=list[NotificationResponse])
+def list_notifications(order_id: int) -> list[NotificationResponse]:
+    repository: OrderRepository = app.state.order_repository
+    get_order_or_404(repository, order_id)
+    return [
+        NotificationResponse(
+            order_id=notification.order_id,
+            type=notification.type,
+            recipient=notification.recipient,
+            message=notification.message,
+            at=notification.at.isoformat(),
+        )
+        for notification in app.state.notification_repository.list_for_order(order_id)
+    ]
