@@ -52,3 +52,15 @@ def test_order_rejects_non_positive_amount() -> None:
             amount=0,
             status="pending",
         )
+
+
+def test_order_accepts_refunded_status_and_normalizes_it() -> None:
+    order = Order(
+        id=1,
+        customer_email="customer@example.com",
+        amount=49.99,
+        status="  Refunded ",
+    )
+
+    assert order.status == "refunded"
+    assert not order.can_cancel
