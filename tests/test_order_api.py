@@ -298,3 +298,91 @@ def test_update_order_cannot_change_email_after_confirmation() -> None:
     assert response.json() == {
         "detail": "customer_email cannot be changed after an order is confirmed"
     }
+
+
+@pytest.mark.parametrize("status", ["refunded", "REFUNDED", "  Refunded  "])
+def test_create_order_accepts_refunded_status(status: str) -> None:
+    response = client.post(
+        "/orders",
+        json={
+            "customer_email": "customer@example.com",
+            "amount": 49.99,
+            "status": status,
+        },
+    )
+
+    assert response.status_code == 201
+    assert response.json()["status"] == "refunded"
+
+
+@pytest.mark.parametrize("status", ["refunded", "REFUNDED", "  Refunded  "])
+def test_update_order_accepts_refunded_status(status: str) -> None:
+    create_response = client.post(
+        "/orders",
+        json={
+            "customer_email": "customer@example.com",
+            "amount": 49.99,
+            "status": "paid",
+        },
+    )
+    order_id = create_response.json()["id"]
+
+    response = client.put(
+        f"/orders/{order_id}",
+        json={
+            "customer_email": "customer@example.com",
+            "amount": 49.99,
+            "status": status,
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "refunded"
+    assert client.get(f"/orders/{order_id}").json()["status"] == "refunded"
+
+
+def test_list_orders_filters_by_refunded_status() -> None:
+    client.post(
+        "/orders",
+        json={
+            "customer_email": "first@example.com",
+            "amount": 25.0,
+            "status": "paid",
+        },
+    )
+    client.post(
+        "/orders",
+        json={
+            "customer_email": "second@example.com",
+            "amount": 30.0,
+            "status": "Refunded",
+        },
+    )
+
+    response = client.get("/orders?status=REFUNDED")
+
+    assert response.status_code == 200
+    assert len(response.json()) == 1
+    assert response.json()[0]["customer_email"] == "second@example.com"
+    assert response.json()[0]["status"] == "refunded"
+
+
+def test_cancel_refunded_order_is_rejected() -> None:
+    create_response = client.post(
+        "/orders",
+        json={
+            "customer_email": "customer@example.com",
+            "amount": 49.99,
+            "status": "refunded",
+        },
+    )
+    order_id = create_response.json()["id"]
+
+    response = client.post(f"/orders/{order_id}/cancel")
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "detail": "Order can only be cancelled from NEW, PENDING, or CONFIRMED status"
+    }
+    assert client.get(f"/orders/{order_id}/audit-records").json() == []
+    assert client.get(f"/orders/{order_id}/notifications").json() == []

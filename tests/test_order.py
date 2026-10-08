@@ -52,3 +52,36 @@ def test_order_rejects_non_positive_amount() -> None:
             amount=0,
             status="pending",
         )
+
+
+@pytest.mark.parametrize("status", ["refunded", "REFUNDED", "  Refunded  "])
+def test_order_accepts_and_normalizes_refunded_status(status: str) -> None:
+    order = Order(
+        id=1,
+        customer_email="customer@example.com",
+        amount=49.99,
+        status=status,
+    )
+
+    assert order.status == "refunded"
+
+
+def test_refunded_order_cannot_be_cancelled() -> None:
+    order = Order(
+        id=1,
+        customer_email="customer@example.com",
+        amount=49.99,
+        status="refunded",
+    )
+
+    assert order.can_cancel is False
+
+
+def test_order_rejects_unknown_status() -> None:
+    with pytest.raises(ValidationError, match="status"):
+        Order(
+            id=1,
+            customer_email="customer@example.com",
+            amount=49.99,
+            status="returned",
+        )
