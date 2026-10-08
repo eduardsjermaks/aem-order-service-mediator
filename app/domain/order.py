@@ -29,10 +29,10 @@ class Order(BaseModel):
     @classmethod
     def validate_status(cls, value: str) -> str:
         normalized = value.strip().lower()
-        allowed = {"new", "pending", "confirmed", "paid", "shipped", "cancelled"}
+        allowed = {"new", "pending", "confirmed", "paid", "shipped", "cancelled", "refunded"}
         if normalized not in allowed:
             raise ValueError(
-                "status must be one of: new, pending, confirmed, paid, shipped, cancelled"
+                "status must be one of: new, pending, confirmed, paid, shipped, cancelled, refunded"
             )
         return normalized
 

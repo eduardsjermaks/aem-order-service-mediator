@@ -20,6 +20,19 @@ def test_order_valid_construction() -> None:
     assert order.updated_at is not None
 
 
+@pytest.mark.parametrize("status", ["refunded", "REFUNDED", "  Refunded  "])
+def test_order_accepts_and_normalizes_refunded_status(status: str) -> None:
+    order = Order(
+        id=1,
+        customer_email="customer@example.com",
+        amount=49.99,
+        status=status,
+    )
+
+    assert order.status == "refunded"
+    assert order.can_cancel is False
+
+
 def test_order_touch_updates_updated_at() -> None:
     order = Order(
         id=1,

@@ -132,6 +132,65 @@ def test_update_order_returns_updated_order() -> None:
     }
 
 
+def test_create_order_accepts_and_normalizes_refunded_status() -> None:
+    response = client.post(
+        "/orders",
+        json={
+            "customer_email": "customer@example.com",
+            "amount": 49.99,
+            "status": "  REFUNDED  ",
+        },
+    )
+
+    assert response.status_code == 201
+    assert response.json()["status"] == "refunded"
+    assert client.get(f"/orders/{response.json()['id']}").json()["status"] == "refunded"
+
+
+def test_update_order_accepts_and_normalizes_refunded_status() -> None:
+    create_response = client.post(
+        "/orders",
+        json={
+            "customer_email": "customer@example.com",
+            "amount": 49.99,
+            "status": "paid",
+        },
+    )
+    order_id = create_response.json()["id"]
+
+    response = client.put(
+        f"/orders/{order_id}",
+        json={
+            "customer_email": "customer@example.com",
+            "amount": 49.99,
+            "status": " Refunded ",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "refunded"
+    assert client.get(f"/orders/{order_id}").json()["status"] == "refunded"
+    assert len(client.get("/orders?status=REFUNDED").json()) == 1
+
+
+def test_cancel_refunded_order_is_rejected() -> None:
+    create_response = client.post(
+        "/orders",
+        json={
+            "customer_email": "customer@example.com",
+            "amount": 49.99,
+            "status": "refunded",
+        },
+    )
+    order_id = create_response.json()["id"]
+
+    response = client.post(f"/orders/{order_id}/cancel")
+
+    assert response.status_code == 400
+    assert client.get(f"/orders/{order_id}").json()["status"] == "refunded"
+    assert client.get(f"/orders/{order_id}/audit-records").json() == []
+
+
 def test_update_missing_order_returns_404() -> None:
     response = client.put(
         "/orders/999",
